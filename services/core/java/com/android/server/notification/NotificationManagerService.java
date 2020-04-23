@@ -383,6 +383,7 @@ public class NotificationManagerService extends SystemService {
     private boolean mUseAttentionLight;
     boolean mHasLight = true;
     boolean mLightEnabled;
+    protected boolean mInCall = false;
     boolean mSystemReady;
 
     private boolean mDisableNotificationEffects;
@@ -5949,43 +5950,34 @@ public class NotificationManagerService extends SystemService {
         record.setAudiblyAlerted(buzz || beep);
     }
 
-    @GuardedBy("mNotificationLock")
-    boolean canShowLightsLocked(final NotificationRecord record, boolean aboveThreshold) {
-        // device lacks light
-        if (!mHasLight) {
+    @GuardedBy({"mNotificationLock"})
+    public boolean canShowLightsLocked(NotificationRecord record, boolean aboveThreshold) {
+        if (!mHasLight || !mNotificationPulseEnabled || record.getLight() == null || !aboveThreshold || (record.getSuppressedVisualEffects() & 8) != 0) {
             return false;
         }
-        // user turned lights off globally
-        if (!mNotificationPulseEnabled) {
+        Notification notification = record.getNotification();
+        if (record.isUpdate && (notification.flags & 8) != 0) {
             return false;
         }
-        // the notification/channel has no light
-        if (record.getLight() == null) {
-            return false;
-        }
-        // unimportant notification
-        if (!aboveThreshold) {
-            return false;
-        }
-        // suppressed due to DND
-        if ((record.getSuppressedVisualEffects() & SUPPRESSED_EFFECT_LIGHTS) != 0) {
-            return false;
-        }
-        // Suppressed because it's a silent update
-        final Notification notification = record.getNotification();
-        if (record.isUpdate && (notification.flags & FLAG_ONLY_ALERT_ONCE) != 0) {
-            return false;
-        }
-        // Suppressed because another notification in its group handles alerting
         if (record.sbn.isGroup() && record.getNotification().suppressAlertingDueToGrouping()) {
             return false;
         }
-        // not if in call or the screen's on
-        if (isInCall() || mScreenOn) {
-            return false;
+        if (!isInCall()||!mScreenOn) {
+            return true;
         }
-
-        return true;
+        boolean equals = record.getChannel().getId().equals("phone_missed_call");
+        String str = TAG;
+        if (equals) {
+            Slog.w(str, "canShowLightsLocked phone_missed_call return true!!!");
+            return true;
+        }
+        StringBuilder sb = new StringBuilder();
+        sb.append("canShowLightsLocked return false,  mInCall=");
+        sb.append(isInCall());
+        sb.append(", mScreenOn=");
+        sb.append(this.mScreenOn);
+        Slog.d(str, sb.toString());
+        return false;
     }
 
     @GuardedBy("mNotificationLock")
